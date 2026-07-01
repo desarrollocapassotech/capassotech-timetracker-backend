@@ -149,12 +149,12 @@ export class AuthService {
     return this.resolveUserProfileFromFirestore(uid, email);
   }
 
-  // Espejo exacto de la lógica original de AuthContext.login/onAuthStateChanged: lee
-  // /users/{uid}, migra 'role' (string) -> 'roles' (array) si hace falta, y crea el
-  // doc con defaults si todavía no existe.
+  // Fallback de solo lectura para cuentas que todavía no son colaboradores en Neon
+  // (por ejemplo, clientes). Firestore es la base de producción actual: el backend
+  // nunca escribe ahí, solo lee. Si el doc /users/{uid} no existe, se devuelve un
+  // perfil por defecto en memoria, sin crear nada en Firestore.
   private async resolveUserProfileFromFirestore(uid: string, email: string): Promise<AuthenticatedUser> {
-    const userRef = this.firestore.collection('users').doc(uid);
-    const snap = await userRef.get();
+    const snap = await this.firestore.collection('users').doc(uid).get();
 
     if (snap.exists) {
       const data = snap.data() as Record<string, unknown>;
@@ -176,13 +176,12 @@ export class AuthService {
       };
     }
 
-    const fallback = {
+    return {
+      id: uid,
       name: '',
       roles: [UserRole.COLABORADOR],
       hourlyRate: 0,
       email,
     };
-    await userRef.set(fallback);
-    return { id: uid, ...fallback };
   }
 }
