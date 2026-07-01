@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { ClientsModule } from './clients/clients.module';
 import { CollaboratorsModule } from './collaborators/collaborators.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
@@ -16,6 +17,7 @@ import { TimeEntriesModule } from './time-entries/time-entries.module';
     DatabaseModule,
     AuthModule,
     CollaboratorsModule,
+    ClientsModule,
     HealthModule,
     UsersModule,
     ProjectsModule,

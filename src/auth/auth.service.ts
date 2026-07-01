@@ -4,7 +4,7 @@ import type { App } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { Firestore, getFirestore } from 'firebase-admin/firestore';
 import { Repository } from 'typeorm';
-import { CollaboratorEntity } from '../database/entities';
+import { ClientEntity, CollaboratorEntity } from '../database/entities';
 import { mapIdentityToolkitError } from './auth-error.util';
 import { FIREBASE_ADMIN } from './firebase-admin.provider';
 import { IdentityToolkitClient, IdentityToolkitException } from './identity-toolkit.client';
@@ -19,6 +19,8 @@ export class AuthService {
     private readonly identityToolkit: IdentityToolkitClient,
     @InjectRepository(CollaboratorEntity)
     private readonly collaboratorRepository: Repository<CollaboratorEntity>,
+    @InjectRepository(ClientEntity)
+    private readonly clientRepository: Repository<ClientEntity>,
   ) {
     this.firestore = getFirestore(firebaseApp);
   }
@@ -129,11 +131,10 @@ export class AuthService {
     }
   }
 
-  // Resuelve el perfil autenticado. Si el usuario es colaborador, Neon
-  // (tracker.collaborators) es la fuente autoritativa de nombre/roles/sueldo desde
-  // la migración de gestión de colaboradores. Si no (por ejemplo, clientes, que
-  // todavía no se migraron), se mantiene el comportamiento previo leyendo
-  // Firestore /users/{uid}.
+  // Resuelve el perfil autenticado. Si el usuario es colaborador o cliente, Neon
+  // (tracker.collaborators / tracker.clients) es la fuente autoritativa desde sus
+  // respectivas migraciones. Si no (cuenta todavía no migrada), se mantiene el
+  // comportamiento previo leyendo Firestore /users/{uid} (solo lectura).
   private async resolveUserProfile(uid: string, email: string): Promise<AuthenticatedUser> {
     const collaborator = await this.collaboratorRepository.findOneBy({ userId: uid });
     if (collaborator) {
@@ -143,6 +144,19 @@ export class AuthService {
         name: collaborator.name,
         roles: collaborator.roles,
         hourlyRate: Number(collaborator.hourlyRate),
+      };
+    }
+
+    const client = await this.clientRepository.findOneBy({ userId: uid });
+    if (client) {
+      // Los clientes siempre tienen el único rol 'client' y no manejan sueldo,
+      // igual que el espejo que antes se escribía a mano en Firestore /users/{uid}.
+      return {
+        id: uid,
+        email,
+        name: client.name,
+        roles: [UserRole.CLIENT],
+        hourlyRate: 0,
       };
     }
 
