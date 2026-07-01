@@ -57,6 +57,28 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+## Base de datos (Neon / Postgres)
+
+El backend usa TypeORM contra Neon. Ver el modelo aprobado en [`database/README.md`](./database/README.md).
+
+1. Copiá `.env.example` a `.env` y completá `DATABASE_URL` con la connection string
+   de la rama de Neon que corresponda (ver tabla de entornos abajo).
+2. Corré las migraciones para crear/actualizar las tablas: `npm run migration:run`.
+3. Con el server corriendo (`npm run start:dev`), `GET /health/db` escribe, lee y
+   borra un registro de prueba contra la base para confirmar la conexión.
+
+| Entorno | Rama GitHub | Rama Neon | `DATABASE_URL` |
+|---|---|---|---|
+| QA | `develop` | `develop` | secreto de CI/hosting para el deploy de `develop` |
+| Producción | `main` | `production` | secreto de CI/hosting para el deploy de `main` |
+| Local | cualquiera | `develop` (recomendado) | `.env`, no se commitea |
+
+Las migraciones viven en `src/database/migrations/` y son idempotentes (seguras de
+re-ejecutar aunque la tabla/tipo ya exista), porque las ramas `develop` y
+`production` de Neon se crearon a partir de una rama que ya tenía el schema
+aplicado a mano durante el diseño. `synchronize` está en `false` siempre: TypeORM
+nunca altera el schema solo, todo cambio pasa por una migración nueva.
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.

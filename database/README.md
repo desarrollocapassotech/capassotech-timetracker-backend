@@ -14,19 +14,24 @@ DDL completo: [`schema.sql`](./schema.sql). Ya aplicado contra Neon (ver estado 
 - Base de datos: `neondb`
 - Schema: `tracker`
 - Región: `sa-east-1`
-- Host: `ep-dawn-moon-ac9utlau.sa-east-1.aws.neon.tech`
+- Dos ramas de Neon, una por entorno:
+  - **`production`** (host `ep-dawn-moon-ac9utlau...sa-east-1.aws.neon.tech`) ← deploy de la rama `main` en GitHub.
+  - **`develop`** (host `ep-icy-moon-accygbr1...sa-east-1.aws.neon.tech`) ← deploy de la rama `develop` en GitHub (QA), y también la usada para desarrollo local.
 
-Connection string: ver `DATABASE_URL` en `.env` (backend), **no** commitear. Hay un
-`.env.example` con el formato esperado. El acceso a este proyecto Neon queda
-restringido a quien tenga esa credencial — no dar acceso de colaborador/miembro en
-la consola de Neon a menos que corresponda.
+Connection strings: ver `DATABASE_URL` en `.env` (backend, apunta a `develop` por
+defecto), **no** commitear. Hay un `.env.example` con el formato esperado. El acceso
+a este proyecto Neon queda restringido a quien tenga esas credenciales — no dar
+acceso de colaborador/miembro en la consola de Neon a menos que corresponda.
 
-Aplicado y validado por conexión directa (`pg` driver, sin pasar por integraciones
-compartidas): las 7 tablas existen y son accesibles vía `tracker.*`
-(`app_users`, `collaborators`, `clients`, `projects`, `project_collaborators`,
-`client_functional_analysts`, `time_entries`), con las 9 foreign keys esperadas
-(`RESTRICT` en `time_entries`, `CASCADE` en las tablas puente, `SET NULL` en los
-vínculos opcionales a `app_users`/`clients`).
+Aplicado y validado en ambas ramas (`production` y `develop`) por conexión directa
+del backend vía TypeORM (`GET /health/db` hace un round-trip real de escritura +
+lectura): las 7 tablas del modelo de negocio existen y son accesibles vía
+`tracker.*` (`app_users`, `collaborators`, `clients`, `projects`,
+`project_collaborators`, `client_functional_analysts`, `time_entries`), con las 9
+foreign keys esperadas (`RESTRICT` en `time_entries`, `CASCADE` en las tablas
+puente, `SET NULL` en los vínculos opcionales a `app_users`/`clients`), más la
+tabla de diagnóstico `health_checks`. Ver [`../README.md`](../README.md) para cómo
+correr las migraciones que crean/actualizan este schema desde el backend.
 
 ## Tablas
 
