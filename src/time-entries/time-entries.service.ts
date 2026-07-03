@@ -1,4 +1,5 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
@@ -11,8 +12,15 @@ export interface RequesterContext {
   roles: UserRole[];
 }
 
+// Reporting está en Argentina; se fija el offset acá en vez de usar la zona
+// horaria del server (Render corre en UTC) para no romper el formato que ya
+// espera la hoja de cálculo.
+const ARGENTINA_UTC_OFFSET = '-03:00';
+
 @Injectable()
 export class TimeEntriesService {
+  private readonly logger = new Logger(TimeEntriesService.name);
+
   constructor(
     @InjectRepository(TimeEntryEntity)
     private readonly timeEntryRepository: Repository<TimeEntryEntity>,
@@ -20,6 +28,7 @@ export class TimeEntriesService {
     private readonly collaboratorRepository: Repository<CollaboratorEntity>,
     @InjectRepository(ProjectEntity)
     private readonly projectRepository: Repository<ProjectEntity>,
+    private readonly configService: ConfigService,
   ) {}
 
   findAll(): Promise<TimeEntryEntity[]> {
@@ -73,7 +82,14 @@ export class TimeEntriesService {
       taskBillingType: dto.taskBillingType ?? TaskBillingType.FEATURE,
     });
 
-    return this.timeEntryRepository.save(entry);
+    const saved = await this.timeEntryRepository.save(entry);
+
+    // Best-effort: si falla el webhook de reporting no debe afectar la carga de horas.
+    this.appendToGoogleSheet(saved).catch((error) => {
+      this.logger.warn(`No se pudo volcar el registro de horas a Google Sheets: ${(error as Error).message}`);
+    });
+
+    return saved;
   }
 
   // Edición: solo admin/contable (ver TimeEntriesController), ninguna otra revisión
@@ -133,5 +149,41 @@ export class TimeEntriesService {
       throw new BadRequestException('La fecha no tiene un formato válido.');
     }
     return date.toISOString().split('T')[0];
+  }
+
+  // Vuelca el registro a una hoja de cálculo externa usada para reporting.
+  // Migrado desde el frontend (antes lo llamaba el navegador directo); mismo
+  // payload y formato de fecha que esperaba el Apps Script.
+  private async appendToGoogleSheet(entry: TimeEntryEntity): Promise<void> {
+    const url = this.configService.get<string>('GOOGLE_SHEETS_TIME_ENTRIES_WEBHOOK_URL');
+    if (!url) {
+      return;
+    }
+
+    const dateWithOffset = `${entry.date}T00:00:00${ARGENTINA_UTC_OFFSET}`;
+
+    const payload = {
+      colaboradorId: entry.collaboratorId,
+      colaboradorName: entry.collaboratorName,
+      taskId: entry.taskId,
+      taskTitle: entry.taskTitle ?? '',
+      projectId: entry.projectId,
+      projectName: entry.projectName ?? '',
+      startDate: dateWithOffset,
+      endDate: dateWithOffset,
+      hours: Number(entry.hours),
+      comments: entry.comments ?? '',
+      taskBillingType: entry.taskBillingType ?? TaskBillingType.FEATURE,
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Apps Script respondió ${response.status}`);
+    }
   }
 }

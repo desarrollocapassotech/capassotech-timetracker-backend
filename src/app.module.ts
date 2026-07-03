@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { ClientsModule } from './clients/clients.module';
 import { CollaboratorsModule } from './collaborators/collaborators.module';
 import { DatabaseModule } from './database/database.module';
+import { ExchangeRateModule } from './exchange-rate/exchange-rate.module';
 import { HealthModule } from './health/health.module';
 import { UsersModule } from './users/users.module';
 import { ProjectsModule } from './projects/projects.module';
@@ -18,6 +19,7 @@ import { TimeEntriesModule } from './time-entries/time-entries.module';
     AuthModule,
     CollaboratorsModule,
     ClientsModule,
+    ExchangeRateModule,
     HealthModule,
     UsersModule,
     ProjectsModule,
