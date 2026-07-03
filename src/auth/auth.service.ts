@@ -1,8 +1,10 @@
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'crypto';
 import type { App } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { Firestore, getFirestore } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import { Repository } from 'typeorm';
 import { ClientEntity, CollaboratorEntity } from '../database/entities';
 import { mapIdentityToolkitError } from './auth-error.util';
@@ -114,6 +116,26 @@ export class AuthService {
     } catch (error) {
       throw new BadRequestException(this.mapCreateUserError(error));
     }
+  }
+
+  // Sube un archivo a Firebase Storage (mismo bucket que usaba antes el frontend
+  // directo) y devuelve una URL de descarga con el mismo formato que generaba el SDK
+  // de cliente (firebaseStorageDownloadTokens), para que sea indistinguible de las
+  // fotos ya subidas. El Admin SDK no tiene un getDownloadURL() propio, así que se
+  // arma a mano.
+  async uploadProfileImage(buffer: Buffer, contentType: string, path: string): Promise<string> {
+    const bucket = getStorage(this.firebaseApp).bucket();
+    const token = randomUUID();
+    const file = bucket.file(path);
+
+    await file.save(buffer, {
+      contentType,
+      metadata: {
+        metadata: { firebaseStorageDownloadTokens: token },
+      },
+    });
+
+    return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
   }
 
   private mapCreateUserError(error: unknown): string {

@@ -29,6 +29,8 @@ export const firebaseAdminProvider: Provider = {
 
     return initializeApp({
       credential: cert(serviceAccount),
+      storageBucket:
+        config.get<string>('FIREBASE_STORAGE_BUCKET') ?? 'capassotech-timetracker.firebasestorage.app',
     });
   },
 };

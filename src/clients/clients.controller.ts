@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthService } from '../auth/auth.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -50,6 +51,22 @@ export class ClientsController {
   ) {
     const requesterProfile = await this.authService.getProfile(user.uid, user.email);
     return this.clientsService.update(id, body, {
+      uid: user.uid,
+      roles: requesterProfile.roles,
+    });
+  }
+
+  // Foto de perfil: mismo criterio que update() — hoy solo admin, los clientes no
+  // tienen autoedición de foto (UserProfile.tsx no lo permite para el rol client).
+  @Post(':id/profile-image')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async uploadProfileImage(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    const requesterProfile = await this.authService.getProfile(user.uid, user.email);
+    return this.clientsService.uploadProfileImage(id, file, {
       uid: user.uid,
       roles: requesterProfile.roles,
     });

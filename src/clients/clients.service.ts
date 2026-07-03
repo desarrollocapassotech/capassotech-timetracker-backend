@@ -10,6 +10,7 @@ import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 import { AuthService } from '../auth/auth.service';
 import { UserRole } from '../auth/auth.types';
+import { assertValidImageFile, buildClientImagePath } from '../common/profile-image.util';
 import { AppUserEntity, BillingCurrency, ClientEntity, ClientFunctionalAnalystEntity } from '../database/entities';
 import { normalizeBillableConfig } from './billable-config.util';
 import { CreateClientDto, UpdateClientDto } from './clients.dto';
@@ -197,6 +198,30 @@ export class ClientsService {
       await this.replaceAnalysts(id, analystsToApply);
     }
 
+    return this.withAnalysts(saved);
+  }
+
+  // Sube la foto de perfil y la persiste en el mismo paso. Mismo criterio de
+  // permisos que update(): solo se puede si 'profileImageUrl' está en el set de
+  // campos permitidos (hoy, solo admin — los clientes no tienen autoedición de foto,
+  // igual que en UserProfile.tsx).
+  async uploadProfileImage(
+    id: string,
+    file: Express.Multer.File | undefined,
+    requester: RequesterContext,
+  ): Promise<ClientResponse> {
+    assertValidImageFile(file);
+
+    const existing = await this.findEntity(id);
+    const allowedFields = this.resolveAllowedFields(existing, requester);
+    if (!allowedFields.has('profileImageUrl')) {
+      throw new ForbiddenException('No tenés permisos para cambiar esta foto de perfil.');
+    }
+
+    const path = buildClientImagePath(id, file.originalname);
+    existing.profileImageUrl = await this.authService.uploadProfileImage(file.buffer, file.mimetype, path);
+
+    const saved = await this.clientRepository.save(existing);
     return this.withAnalysts(saved);
   }
 

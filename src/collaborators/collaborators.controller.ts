@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthService } from '../auth/auth.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -50,6 +51,24 @@ export class CollaboratorsController {
   ) {
     const requesterProfile = await this.authService.getProfile(user.uid, user.email);
     return this.collaboratorsService.update(id, body, {
+      uid: user.uid,
+      roles: requesterProfile.roles,
+    });
+  }
+
+  // Foto de perfil: mismo criterio de permisos que update() (ver
+  // CollaboratorsService.resolveAllowedFields) — admin, o el propio colaborador
+  // sobre su perfil. Sube directo a Firebase Storage vía el backend, en vez de
+  // subir desde el navegador como antes.
+  @Post(':id/profile-image')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async uploadProfileImage(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    const requesterProfile = await this.authService.getProfile(user.uid, user.email);
+    return this.collaboratorsService.uploadProfileImage(id, file, {
       uid: user.uid,
       roles: requesterProfile.roles,
     });

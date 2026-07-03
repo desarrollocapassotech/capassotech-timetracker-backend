@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 import { AuthService } from '../auth/auth.service';
+import { assertValidImageFile, buildCollaboratorImagePath } from '../common/profile-image.util';
 import { AppUserEntity, BillingCurrency, CollaboratorEntity, UserRole } from '../database/entities';
 import { CreateCollaboratorDto, UpdateCollaboratorDto } from './collaborators.dto';
 
@@ -188,6 +189,29 @@ export class CollaboratorsService {
           (existing as unknown as Record<string, unknown>)[field] = dto[field] ?? null;
       }
     }
+
+    return this.collaboratorRepository.save(existing);
+  }
+
+  // Sube la foto de perfil y la persiste en el mismo paso. Mismo criterio de
+  // permisos que update(): solo se puede si 'profileImageUrl' está en el set de
+  // campos permitidos para este requester sobre este colaborador (admin, o el
+  // propio colaborador vía UserProfile.tsx).
+  async uploadProfileImage(
+    id: string,
+    file: Express.Multer.File | undefined,
+    requester: RequesterContext,
+  ): Promise<CollaboratorEntity> {
+    assertValidImageFile(file);
+
+    const existing = await this.findOne(id);
+    const allowedFields = this.resolveAllowedFields(existing, requester);
+    if (!allowedFields.has('profileImageUrl')) {
+      throw new ForbiddenException('No tenés permisos para cambiar esta foto de perfil.');
+    }
+
+    const path = buildCollaboratorImagePath(id, file.originalname);
+    existing.profileImageUrl = await this.authService.uploadProfileImage(file.buffer, file.mimetype, path);
 
     return this.collaboratorRepository.save(existing);
   }
