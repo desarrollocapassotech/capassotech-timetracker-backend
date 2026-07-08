@@ -22,6 +22,57 @@ CREATE TYPE tracker.user_role AS ENUM (
   'qa_tester'
 );
 
+-- Ticketera
+CREATE TYPE tracker.ticket_empresa AS ENUM ('vialto', 'capassotech');
+CREATE TYPE tracker.ticket_priority AS ENUM ('baja', 'media', 'alta', 'urgente');
+CREATE TYPE tracker.ticket_state AS ENUM (
+  'nuevo',
+  'en_revision',
+  'en_progreso',
+  'esperando_cliente',
+  'resuelto',
+  'cerrado',
+  'reabierto'
+);
+CREATE TYPE tracker.ticket_origin AS ENUM ('vialto_sso', 'capassotech_form', 'capassotech_login');
+CREATE TYPE tracker.ticket_message_author AS ENUM ('cliente', 'agente');
+
+CREATE TABLE tracker.tickets (
+  id TEXT PRIMARY KEY,
+  codigo TEXT NOT NULL UNIQUE,
+  empresa tracker.ticket_empresa NOT NULL,
+  sistema TEXT NOT NULL,
+  asunto TEXT NOT NULL,
+  descripcion TEXT NOT NULL,
+  prioridad tracker.ticket_priority NOT NULL,
+  estado tracker.ticket_state NOT NULL DEFAULT 'nuevo',
+  origen tracker.ticket_origin NOT NULL,
+  cliente_nombre TEXT NOT NULL,
+  cliente_email TEXT NOT NULL,
+  client_id TEXT NULL REFERENCES tracker.clients(id) ON DELETE SET NULL,
+  asignado_a TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE tracker.ticket_messages (
+  id TEXT PRIMARY KEY,
+  ticket_id TEXT NOT NULL REFERENCES tracker.tickets(id) ON DELETE CASCADE,
+  autor tracker.ticket_message_author NOT NULL,
+  autor_nombre TEXT NULL,
+  mensaje TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE tracker.ticket_attachments (
+  id TEXT PRIMARY KEY,
+  ticket_id TEXT NOT NULL REFERENCES tracker.tickets(id) ON DELETE CASCADE,
+  nombre_archivo TEXT NOT NULL,
+  url TEXT NOT NULL,
+  tipo TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- DataContext.tsx -> SupportedBillingCurrency / normalizeCurrency (default USD)
 CREATE TYPE tracker.billing_currency AS ENUM ('USD', 'ARS');
 

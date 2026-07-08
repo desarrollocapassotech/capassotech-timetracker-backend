@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, UnauthorizedException } from '
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import type { App } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
+import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
 import { Firestore, getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { Repository } from 'typeorm';
@@ -93,6 +93,14 @@ export class AuthService {
     await this.setFirebaseUserPassword(uid, newPassword);
     collaborator.password = newPassword;
     await this.collaboratorRepository.save(collaborator);
+  }
+
+  async verifyIdToken(idToken: string): Promise<DecodedIdToken> {
+    try {
+      return await getAuth(this.firebaseApp).verifyIdToken(idToken);
+    } catch {
+      throw new UnauthorizedException('Token inválido o expirado.');
+    }
   }
 
   async getProfile(uid: string, email: string): Promise<AuthenticatedUser> {
