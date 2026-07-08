@@ -5,7 +5,7 @@ import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ClientEntity, TicketAttachmentEntity, TicketEntity, TicketMessageEntity } from '../database/entities';
 import { AuthService } from '../auth/auth.service';
-import { MailService } from '../common/mail.service';
+// import { MailService } from '../common/mail.service'; // deshabilitado: SMTP_HOST no está configurado en Render, rompía el boot del backend
 import { CreateTicketDto, CreateTicketMessageDto, TicketClientProfileDto } from './tickets.dto';
 import { TicketEmpresa, TicketPriority, TicketState, TicketOrigin, TicketMessageAuthor } from './ticket.enums';
 
@@ -24,7 +24,7 @@ export class TicketsService {
     @InjectRepository(ClientEntity)
     private readonly clientRepository: Repository<ClientEntity>,
     private readonly authService: AuthService,
-    private readonly mailService: MailService,
+    // private readonly mailService: MailService, // deshabilitado: SMTP_HOST no está configurado en Render
     private readonly configService: ConfigService,
   ) {
     this.supportEmails = this.parseSupportEmails();
@@ -68,13 +68,14 @@ export class TicketsService {
 
     const saved = await this.ticketRepository.save(ticket);
 
-    try {
-      await this.sendTicketEmails(saved);
-    } catch (error) {
-      throw new InternalServerErrorException(
-        'El ticket se creó, pero no se pudo notificar por email. Revisá la configuración de correo.',
-      );
-    }
+    // Notificación por email deshabilitada: SMTP_HOST no está configurado en Render.
+    // try {
+    //   await this.sendTicketEmails(saved);
+    // } catch (error) {
+    //   throw new InternalServerErrorException(
+    //     'El ticket se creó, pero no se pudo notificar por email. Revisá la configuración de correo.',
+    //   );
+    // }
 
     return saved;
   }
@@ -151,39 +152,40 @@ export class TicketsService {
     throw new InternalServerErrorException('No se pudo generar un código de seguimiento único.');
   }
 
-  private async sendTicketEmails(ticket: TicketEntity) {
-    if (this.supportEmails.length === 0) {
-      throw new InternalServerErrorException('No hay direcciones de soporte configuradas.');
-    }
-
-    const subject = `Nuevo ticket de soporte: ${ticket.codigo}`;
-    const publicUrl = this.configService.get<string>('TICKET_PUBLIC_URL') ?? 'http://localhost:5173/seguimiento';
-    const body = [
-      `Código: ${ticket.codigo}`,
-      `Empresa: ${ticket.empresa}`,
-      `Sistema: ${ticket.sistema}`,
-      `Asunto: ${ticket.asunto}`,
-      `Descripción: ${ticket.descripcion}`,
-      `Prioridad: ${ticket.prioridad}`,
-      `Cliente: ${ticket.clienteNombre} <${ticket.clienteEmail}>`,
-      `Seguimiento: ${publicUrl}/${ticket.codigo}`,
-    ].join('\n');
-
-    await Promise.all([
-      this.mailService.sendMail({
-        from: this.fromEmail,
-        to: ticket.clienteEmail,
-        subject,
-        text: `Gracias por tu reporte. Tu ticket se registró correctamente.\n\n${body}`,
-      }),
-      this.mailService.sendMail({
-        from: this.fromEmail,
-        to: this.supportEmails,
-        subject: `Nuevo ticket ${ticket.codigo} - ${ticket.clienteNombre}`,
-        text: body,
-      }),
-    ]);
-  }
+  // Deshabilitado junto con MailService: SMTP_HOST no está configurado en Render.
+  // private async sendTicketEmails(ticket: TicketEntity) {
+  //   if (this.supportEmails.length === 0) {
+  //     throw new InternalServerErrorException('No hay direcciones de soporte configuradas.');
+  //   }
+  //
+  //   const subject = `Nuevo ticket de soporte: ${ticket.codigo}`;
+  //   const publicUrl = this.configService.get<string>('TICKET_PUBLIC_URL') ?? 'http://localhost:5173/seguimiento';
+  //   const body = [
+  //     `Código: ${ticket.codigo}`,
+  //     `Empresa: ${ticket.empresa}`,
+  //     `Sistema: ${ticket.sistema}`,
+  //     `Asunto: ${ticket.asunto}`,
+  //     `Descripción: ${ticket.descripcion}`,
+  //     `Prioridad: ${ticket.prioridad}`,
+  //     `Cliente: ${ticket.clienteNombre} <${ticket.clienteEmail}>`,
+  //     `Seguimiento: ${publicUrl}/${ticket.codigo}`,
+  //   ].join('\n');
+  //
+  //   await Promise.all([
+  //     this.mailService.sendMail({
+  //       from: this.fromEmail,
+  //       to: ticket.clienteEmail,
+  //       subject,
+  //       text: `Gracias por tu reporte. Tu ticket se registró correctamente.\n\n${body}`,
+  //     }),
+  //     this.mailService.sendMail({
+  //       from: this.fromEmail,
+  //       to: this.supportEmails,
+  //       subject: `Nuevo ticket ${ticket.codigo} - ${ticket.clienteNombre}`,
+  //       text: body,
+  //     }),
+  //   ]);
+  // }
 
   private parseSupportEmails(): string[] {
     const raw = this.configService.get<string>('TICKET_SUPPORT_EMAILS') ?? '';
