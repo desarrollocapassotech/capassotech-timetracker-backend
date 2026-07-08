@@ -1,7 +1,7 @@
 import { Body, Controller, Get, NotFoundException, Param, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { TicketsService } from './tickets.service';
-import { CreateTicketDto, CreateTicketMessageDto } from './tickets.dto';
+import type { CreateTicketDto, CreateTicketMessageDto } from './tickets.dto';
 
 @Controller()
 export class TicketsController {

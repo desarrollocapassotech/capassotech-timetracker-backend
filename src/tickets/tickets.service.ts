@@ -82,7 +82,7 @@ export class TicketsService {
   async findByCode(codigo: string): Promise<TicketEntity> {
     const ticket = await this.ticketRepository.findOne({
       where: { codigo },
-      relations: ['mensajes', 'adjuntos'],
+      relations: { mensajes: true, adjuntos: true },
       order: { mensajes: { creadoEn: 'ASC' } },
     });
     if (!ticket) {
