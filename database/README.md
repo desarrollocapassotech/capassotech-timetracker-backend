@@ -174,7 +174,14 @@ app_users 1───1 clients       (user_id, opcional)
    unificaron en una sola tabla puente con columna `role`, en vez de dos tablas
    idénticas en estructura que solo se diferenciaban por su nombre.
 
-## Próximos pasos (fuera de esta tarea)
+## Estado actual
 
-- Migración de datos real desde Firestore hacia estas tablas.
-- Conectar el backend NestJS a Neon (ORM, módulo de configuración, variables de entorno).
+La migración de datos real desde Firestore ya se hizo (colaboradores, clientes,
+proyectos y horas trabajadas), vía los scripts en `../scripts/migrate-*-from-
+firestore.js`, y el backend NestJS ya está conectado a Neon en ambos entornos
+(`develop` y `production`). Firestore dejó de ser la fuente de datos de negocio;
+solo queda como fallback de solo lectura para resolver el perfil de cuentas de
+Firebase Auth que no tengan colaborador/cliente en Neon. Ver
+[`../docs/ARQUITECTURA.md`](../docs/ARQUITECTURA.md) para el detalle del backend
+(módulos, auth, permisos, servicios externos, deploy) y del estado de Firestore
+antes de darlo de baja.

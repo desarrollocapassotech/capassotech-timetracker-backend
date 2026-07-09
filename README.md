@@ -57,6 +57,12 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+## Arquitectura
+
+Ver [`docs/ARQUITECTURA.md`](./docs/ARQUITECTURA.md) para cómo está armado el
+backend hoy: módulos, autenticación, permisos por rol, qué de Firebase sigue en
+uso (y por qué), endpoints, variables de entorno y entornos de deploy.
+
 ## Base de datos (Neon / Postgres)
 
 El backend usa TypeORM contra Neon. Ver el modelo aprobado en [`database/README.md`](./database/README.md).

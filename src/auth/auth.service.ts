@@ -1,7 +1,12 @@
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'crypto';
 import type { App } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
-import { DocumentReference, Firestore, getFirestore } from 'firebase-admin/firestore';
+import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
+import { Firestore, getFirestore } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
+import { Repository } from 'typeorm';
+import { ClientEntity, CollaboratorEntity } from '../database/entities';
 import { mapIdentityToolkitError } from './auth-error.util';
 import { FIREBASE_ADMIN } from './firebase-admin.provider';
 import { IdentityToolkitClient, IdentityToolkitException } from './identity-toolkit.client';
@@ -14,6 +19,10 @@ export class AuthService {
   constructor(
     @Inject(FIREBASE_ADMIN) private readonly firebaseApp: App,
     private readonly identityToolkit: IdentityToolkitClient,
+    @InjectRepository(CollaboratorEntity)
+    private readonly collaboratorRepository: Repository<CollaboratorEntity>,
+    @InjectRepository(ClientEntity)
+    private readonly clientRepository: Repository<ClientEntity>,
   ) {
     this.firestore = getFirestore(firebaseApp);
   }
@@ -70,46 +79,126 @@ export class AuthService {
 
   // Igual que el comportamiento previo: solo disponible para colaboradores, y no pide
   // la contraseña actual (queda documentado como deuda de UX/seguridad para otra tarea).
+  // Desde la migración de colaboradores a Neon, la fuente del espejo de password pasó
+  // de Firestore a tracker.collaborators.
   async changePassword(uid: string, newPassword: string): Promise<void> {
-    const collaboratorRef = await this.findCollaboratorDocByAuthUid(uid);
-    if (!collaboratorRef) {
+    const collaborator = await this.collaboratorRepository.findOneBy({ userId: uid });
+    if (!collaborator) {
       throw new BadRequestException({
         code: 'auth/no-collaborator-profile',
         message: 'Debes completar tu perfil antes de actualizar la contraseña.',
       });
     }
 
-    await getAuth(this.firebaseApp).updateUser(uid, { password: newPassword });
-    // Mantiene en sync el espejo en Firestore (colaboradores.password), igual que hacía
-    // DataContext.updateColaborador antes de esta migración.
-    await collaboratorRef.set({ password: newPassword }, { merge: true });
+    await this.setFirebaseUserPassword(uid, newPassword);
+    collaborator.password = newPassword;
+    await this.collaboratorRepository.save(collaborator);
+  }
+
+  async verifyIdToken(idToken: string): Promise<DecodedIdToken> {
+    try {
+      return await getAuth(this.firebaseApp).verifyIdToken(idToken);
+    } catch {
+      throw new UnauthorizedException('Token inválido o expirado.');
+    }
   }
 
   async getProfile(uid: string, email: string): Promise<AuthenticatedUser> {
     return this.resolveUserProfile(uid, email);
   }
 
-  private async findCollaboratorDocByAuthUid(uid: string): Promise<DocumentReference | null> {
-    const byId = await this.firestore.collection('colaboradores').doc(uid).get();
-    if (byId.exists) {
-      return byId.ref;
+  // Usado por CollaboratorsService al dar de alta un colaborador con acceso propio.
+  async createFirebaseUser(email: string, password: string): Promise<string> {
+    try {
+      const user = await getAuth(this.firebaseApp).createUser({ email, password });
+      return user.uid;
+    } catch (error) {
+      throw new BadRequestException(this.mapCreateUserError(error));
     }
-
-    const byUidQuery = await this.firestore
-      .collection('colaboradores')
-      .where('uid', '==', uid)
-      .limit(1)
-      .get();
-
-    return byUidQuery.empty ? null : byUidQuery.docs[0].ref;
   }
 
-  // Espejo exacto de la lógica de AuthContext.login/onAuthStateChanged: lee
-  // /users/{uid}, migra 'role' (string) -> 'roles' (array) si hace falta, y crea el
-  // doc con defaults si todavía no existe.
+  // Usado por CollaboratorsService cuando un admin resetea la contraseña de un colaborador.
+  async setFirebaseUserPassword(uid: string, password: string): Promise<void> {
+    try {
+      await getAuth(this.firebaseApp).updateUser(uid, { password });
+    } catch (error) {
+      throw new BadRequestException(this.mapCreateUserError(error));
+    }
+  }
+
+  // Sube un archivo a Firebase Storage (mismo bucket que usaba antes el frontend
+  // directo) y devuelve una URL de descarga con el mismo formato que generaba el SDK
+  // de cliente (firebaseStorageDownloadTokens), para que sea indistinguible de las
+  // fotos ya subidas. El Admin SDK no tiene un getDownloadURL() propio, así que se
+  // arma a mano.
+  async uploadProfileImage(buffer: Buffer, contentType: string, path: string): Promise<string> {
+    const bucket = getStorage(this.firebaseApp).bucket();
+    const token = randomUUID();
+    const file = bucket.file(path);
+
+    await file.save(buffer, {
+      contentType,
+      metadata: {
+        metadata: { firebaseStorageDownloadTokens: token },
+      },
+    });
+
+    return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+  }
+
+  private mapCreateUserError(error: unknown): string {
+    const code = typeof error === 'object' && error !== null ? (error as { code?: string }).code : undefined;
+    switch (code) {
+      case 'auth/email-already-exists':
+        return 'Ya existe una cuenta con ese email.';
+      case 'auth/invalid-password':
+      case 'auth/weak-password':
+        return 'La contraseña debe tener al menos 6 caracteres.';
+      case 'auth/invalid-email':
+        return 'El email no tiene un formato válido.';
+      default:
+        return 'No se pudo crear/actualizar la cuenta de acceso.';
+    }
+  }
+
+  // Resuelve el perfil autenticado. Si el usuario es colaborador o cliente, Neon
+  // (tracker.collaborators / tracker.clients) es la fuente autoritativa desde sus
+  // respectivas migraciones. Si no (cuenta todavía no migrada), se mantiene el
+  // comportamiento previo leyendo Firestore /users/{uid} (solo lectura).
   private async resolveUserProfile(uid: string, email: string): Promise<AuthenticatedUser> {
-    const userRef = this.firestore.collection('users').doc(uid);
-    const snap = await userRef.get();
+    const collaborator = await this.collaboratorRepository.findOneBy({ userId: uid });
+    if (collaborator) {
+      return {
+        id: uid,
+        email,
+        name: collaborator.name,
+        roles: collaborator.roles,
+        hourlyRate: Number(collaborator.hourlyRate),
+      };
+    }
+
+    const client = await this.clientRepository.findOneBy({ userId: uid });
+    if (client) {
+      // Los clientes siempre tienen el único rol 'client' y no manejan sueldo,
+      // igual que el espejo que antes se escribía a mano en Firestore /users/{uid}.
+      return {
+        id: uid,
+        email,
+        name: client.name,
+        roles: [UserRole.CLIENT],
+        hourlyRate: 0,
+      };
+    }
+
+    return this.resolveUserProfileFromFirestore(uid, email);
+  }
+
+  // Fallback de solo lectura para cuentas que todavía no son colaboradores en Neon
+  // (por ejemplo, clientes). Firestore es la base de producción actual: el backend
+  // nunca escribe ahí, solo lee. Si el doc /users/{uid} no existe, se devuelve un
+  // perfil por defecto en memoria, sin crear nada en Firestore.
+  private async resolveUserProfileFromFirestore(uid: string, email: string): Promise<AuthenticatedUser> {
+    const snap = await this.firestore.collection('users').doc(uid).get();
 
     if (snap.exists) {
       const data = snap.data() as Record<string, unknown>;
@@ -131,13 +220,12 @@ export class AuthService {
       };
     }
 
-    const fallback = {
+    return {
+      id: uid,
       name: '',
       roles: [UserRole.COLABORADOR],
       hourlyRate: 0,
       email,
     };
-    await userRef.set(fallback);
-    return { id: uid, ...fallback };
   }
 }

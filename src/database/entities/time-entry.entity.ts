@@ -49,4 +49,14 @@ export class TimeEntryEntity {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
+
+  // Estado de sincronización con el Google Sheet de reporting (ver TimeEntriesService).
+  @Column({ name: 'sheet_synced_at', type: 'timestamptz', nullable: true })
+  sheetSyncedAt: Date | null;
+
+  @Column({ name: 'sheet_sync_attempts', type: 'int', default: 0 })
+  sheetSyncAttempts: number;
+
+  @Column({ name: 'sheet_sync_last_error', type: 'text', nullable: true })
+  sheetSyncLastError: string | null;
 }
