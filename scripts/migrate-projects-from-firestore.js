@@ -104,18 +104,17 @@ async function main() {
 
       await pgClient.query(
         `INSERT INTO tracker.projects (
-           id, name, active, rate, currency, contract_end_date, billing_type,
+           id, name, active, rate, currency, billing_type,
            client_id, jira_ids, billable_hours_limit, created_at
          ) VALUES (
-           $1, $2, $3, $4, $5::tracker.billing_currency, $6, $7::tracker.project_billing_type,
-           $8, $9, $10, COALESCE($11::timestamptz, now())
+           $1, $2, $3, $4, $5::tracker.billing_currency, $6::tracker.project_billing_type,
+           $7, $8, $9, COALESCE($10::timestamptz, now())
          )
          ON CONFLICT (id) DO UPDATE SET
            name = EXCLUDED.name,
            active = EXCLUDED.active,
            rate = EXCLUDED.rate,
            currency = EXCLUDED.currency,
-           contract_end_date = EXCLUDED.contract_end_date,
            billing_type = EXCLUDED.billing_type,
            client_id = EXCLUDED.client_id,
            jira_ids = EXCLUDED.jira_ids,
@@ -127,7 +126,6 @@ async function main() {
           data.active !== false,
           toNumberOrNull(data.rate),
           normalizeCurrency(data.currency),
-          toNullableString(data.contractEndDate),
           normalizeBillingType(data.billingType),
           toNullableString(data.clientId),
           Array.isArray(data.jiraIds) ? data.jiraIds : [],

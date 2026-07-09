@@ -5,7 +5,6 @@ export interface CreateProjectDto {
   active?: boolean;
   rate?: number | null;
   currency?: BillingCurrency | null;
-  contractEndDate?: string | null;
   billingType?: ProjectBillingType | null;
   clientId?: string | null;
   jiraIds?: string[];
@@ -16,3 +15,13 @@ export interface CreateProjectDto {
 
 // Todos los campos son opcionales: solo se aplican los que vienen en el body.
 export type UpdateProjectDto = Partial<CreateProjectDto>;
+
+// Entregable de un proyecto: 0..N por proyecto, cada uno con su propia fecha.
+export interface ProjectDeliverableDto {
+  name: string;
+  dueDate: string;
+}
+
+export interface ReplaceProjectDeliverablesDto {
+  deliverables: ProjectDeliverableDto[];
+}
