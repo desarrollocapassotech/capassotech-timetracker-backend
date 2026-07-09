@@ -10,12 +10,22 @@ import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 import { AuthService } from '../auth/auth.service';
 import { assertValidImageFile, buildCollaboratorImagePath } from '../common/profile-image.util';
-import { AppUserEntity, BillingCurrency, CollaboratorEntity, UserRole } from '../database/entities';
-import { CreateCollaboratorDto, UpdateCollaboratorDto } from './collaborators.dto';
+import {
+  AppUserEntity,
+  BillingCurrency,
+  CollaboratorEntity,
+  CollaboratorProjectRateEntity,
+  UserRole,
+} from '../database/entities';
+import { CollaboratorProjectRateDto, CreateCollaboratorDto, UpdateCollaboratorDto } from './collaborators.dto';
 
 export interface RequesterContext {
   uid: string;
   roles: UserRole[];
+}
+
+export interface CollaboratorResponse extends CollaboratorEntity {
+  projectRates: CollaboratorProjectRateDto[];
 }
 
 type CollaboratorField = keyof UpdateCollaboratorDto;
@@ -80,22 +90,39 @@ export class CollaboratorsService {
     private readonly collaboratorRepository: Repository<CollaboratorEntity>,
     @InjectRepository(AppUserEntity)
     private readonly appUserRepository: Repository<AppUserEntity>,
+    @InjectRepository(CollaboratorProjectRateEntity)
+    private readonly projectRateRepository: Repository<CollaboratorProjectRateEntity>,
     private readonly authService: AuthService,
   ) {}
 
-  findAll(): Promise<CollaboratorEntity[]> {
-    return this.collaboratorRepository.find({ order: { name: 'ASC' } });
+  async findAll(): Promise<CollaboratorResponse[]> {
+    const [collaborators, rates] = await Promise.all([
+      this.collaboratorRepository.find({ order: { name: 'ASC' } }),
+      this.projectRateRepository.find(),
+    ]);
+
+    const ratesByCollaborator = new Map<string, CollaboratorProjectRateDto[]>();
+    for (const rate of rates) {
+      const list = ratesByCollaborator.get(rate.collaboratorId) ?? [];
+      list.push({ projectId: rate.projectId, hourlyRate: Number(rate.hourlyRate) });
+      ratesByCollaborator.set(rate.collaboratorId, list);
+    }
+
+    return collaborators.map((collaborator) => ({
+      ...collaborator,
+      projectRates: ratesByCollaborator.get(collaborator.id) ?? [],
+    }));
   }
 
-  async findOne(id: string): Promise<CollaboratorEntity> {
+  async findOne(id: string): Promise<CollaboratorResponse> {
     const found = await this.collaboratorRepository.findOneBy({ id });
     if (!found) {
       throw new NotFoundException('Colaborador no encontrado.');
     }
-    return found;
+    return this.attachProjectRates(found);
   }
 
-  async create(dto: CreateCollaboratorDto): Promise<CollaboratorEntity> {
+  async create(dto: CreateCollaboratorDto): Promise<CollaboratorResponse> {
     if (!dto.name?.trim() || !dto.startedDate || dto.hourlyRate === undefined || dto.hourlyRate === null) {
       throw new BadRequestException('Faltan campos obligatorios (nombre, fecha de inicio, valor por hora).');
     }
@@ -143,14 +170,15 @@ export class CollaboratorsService {
       profileImageUrl: dto.profileImageUrl ?? null,
     });
 
-    return this.collaboratorRepository.save(collaborator);
+    const saved = await this.collaboratorRepository.save(collaborator);
+    return { ...saved, projectRates: [] };
   }
 
   async update(
     id: string,
     dto: UpdateCollaboratorDto,
     requester: RequesterContext,
-  ): Promise<CollaboratorEntity> {
+  ): Promise<CollaboratorResponse> {
     const existing = await this.findOne(id);
     const allowedFields = this.resolveAllowedFields(existing, requester);
 
@@ -201,7 +229,7 @@ export class CollaboratorsService {
     id: string,
     file: Express.Multer.File | undefined,
     requester: RequesterContext,
-  ): Promise<CollaboratorEntity> {
+  ): Promise<CollaboratorResponse> {
     assertValidImageFile(file);
 
     const existing = await this.findOne(id);
@@ -214,6 +242,61 @@ export class CollaboratorsService {
     existing.profileImageUrl = await this.authService.uploadProfileImage(file.buffer, file.mimetype, path);
 
     return this.collaboratorRepository.save(existing);
+  }
+
+  // Reemplaza de una todos los overrides de valor hora por proyecto de este
+  // colaborador (mismo criterio que replaceRoleAssignments en projects.service.ts:
+  // el form manda la lista completa, acá se borra y se reinserta todo junto).
+  // Mismos roles que pueden tocar el sueldo (ver ACCOUNTANT_RATE_FIELDS).
+  async replaceProjectRates(
+    id: string,
+    rates: CollaboratorProjectRateDto[],
+    requester: RequesterContext,
+  ): Promise<CollaboratorResponse> {
+    const canEditRates = requester.roles.includes(UserRole.ADMIN) || requester.roles.includes(UserRole.CONTABLE);
+    if (!canEditRates) {
+      throw new ForbiddenException('No tenés permisos para editar tarifas por proyecto.');
+    }
+
+    await this.findOne(id); // 404 si no existe
+
+    const rateByProject = new Map<string, number>();
+    for (const rate of rates) {
+      if (!rate.projectId) continue;
+      if (!Number.isFinite(rate.hourlyRate) || rate.hourlyRate <= 0) {
+        throw new BadRequestException('El valor hora por proyecto debe ser un número mayor a 0.');
+      }
+      rateByProject.set(rate.projectId, rate.hourlyRate);
+    }
+
+    await this.projectRateRepository.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(CollaboratorProjectRateEntity);
+      await repo.delete({ collaboratorId: id });
+
+      if (!rateByProject.size) return;
+
+      try {
+        const rows = Array.from(rateByProject.entries()).map(([projectId, hourlyRate]) =>
+          repo.create({ collaboratorId: id, projectId, hourlyRate: String(hourlyRate) }),
+        );
+        await repo.save(rows);
+      } catch (error) {
+        if (this.isForeignKeyViolation(error)) {
+          throw new BadRequestException('Uno de los proyectos indicados no existe.');
+        }
+        throw error;
+      }
+    });
+
+    return this.findOne(id);
+  }
+
+  private async attachProjectRates(collaborator: CollaboratorEntity): Promise<CollaboratorResponse> {
+    const rates = await this.projectRateRepository.findBy({ collaboratorId: collaborator.id });
+    return {
+      ...collaborator,
+      projectRates: rates.map((rate) => ({ projectId: rate.projectId, hourlyRate: Number(rate.hourlyRate) })),
+    };
   }
 
   async remove(id: string): Promise<void> {
