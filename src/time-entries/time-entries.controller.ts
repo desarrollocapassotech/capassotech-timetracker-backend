@@ -24,6 +24,25 @@ export class TimeEntriesController {
     return this.timeEntriesService.findAll();
   }
 
+  // Estado de la sincronización con el Google Sheet de reporting: cuántas horas
+  // están sin confirmar todavía y los últimos errores. Declarado antes de
+  // ':id' para que Nest no lo confunda con un id de registro.
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.CONTABLE)
+  @Get('sheet-sync/status')
+  getSheetSyncStatus() {
+    return this.timeEntriesService.getSheetSyncStatus();
+  }
+
+  // Fuerza un reintento ahora mismo (el cron ya lo hace solo cada 5 minutos),
+  // útil para confirmar que quedó todo al día sin esperar al próximo ciclo.
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.CONTABLE)
+  @Post('sheet-sync/run')
+  runSheetSync() {
+    return this.timeEntriesService.resyncPendingSheetEntries();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.timeEntriesService.findOne(id);

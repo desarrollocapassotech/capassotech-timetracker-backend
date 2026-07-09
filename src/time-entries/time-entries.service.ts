@@ -1,11 +1,27 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { UserRole } from '../auth/auth.types';
 import { CollaboratorEntity, ProjectEntity, TaskBillingType, TimeEntryEntity } from '../database/entities';
 import { CreateTimeEntryDto, UpdateTimeEntryDto } from './time-entries.dto';
+
+export interface SheetSyncRunResult {
+  attempted: number;
+  synced: number;
+}
+
+export interface SheetSyncStatus {
+  pendingCount: number;
+  oldestPendingDate: string | null;
+  recentErrors: Array<{ id: string; date: string; attempts: number; lastError: string | null }>;
+}
+
+// Cuántos registros pendientes reintenta como máximo cada corrida (cron o manual),
+// para no mandarle a Apps Script una ráfaga enorme de golpe si estuvo caído un rato.
+const SHEET_SYNC_BATCH_SIZE = 100;
 
 export interface RequesterContext {
   uid: string;
@@ -84,9 +100,10 @@ export class TimeEntriesService {
 
     const saved = await this.timeEntryRepository.save(entry);
 
-    // Best-effort: si falla el webhook de reporting no debe afectar la carga de horas.
-    this.appendToGoogleSheet(saved).catch((error) => {
-      this.logger.warn(`No se pudo volcar el registro de horas a Google Sheets: ${(error as Error).message}`);
+    // Intento inmediato (no bloquea la respuesta al usuario). Si falla, queda
+    // con sheetSyncedAt = null y lo levanta resyncPendingSheetEntries().
+    this.trySyncToGoogleSheet(saved).catch((error) => {
+      this.logger.error(`Error inesperado sincronizando ${saved.id} con Sheets: ${(error as Error).message}`);
     });
 
     return saved;
@@ -185,5 +202,74 @@ export class TimeEntriesService {
     if (!response.ok) {
       throw new Error(`Apps Script respondió ${response.status}`);
     }
+  }
+
+  // Intenta volcar un registro puntual y persiste el resultado (sheetSyncedAt o
+  // el error/intento) para que quede trazado quién falta y por qué.
+  private async trySyncToGoogleSheet(entry: TimeEntryEntity): Promise<boolean> {
+    try {
+      await this.appendToGoogleSheet(entry);
+      await this.timeEntryRepository.update(entry.id, {
+        sheetSyncedAt: new Date(),
+        sheetSyncLastError: null,
+      });
+      return true;
+    } catch (error) {
+      const message = (error as Error).message;
+      this.logger.warn(`No se pudo volcar el registro ${entry.id} a Google Sheets: ${message}`);
+      await this.timeEntryRepository.update(entry.id, { sheetSyncLastError: message });
+      await this.timeEntryRepository.increment({ id: entry.id }, 'sheetSyncAttempts', 1);
+      return false;
+    }
+  }
+
+  // Red de seguridad: reintenta lo que haya quedado sin confirmar (falla de red,
+  // Apps Script caído, cuota excedida, etc). Corre solo, y también queda expuesto
+  // para forzarlo manualmente desde el endpoint de admin.
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async resyncPendingSheetEntries(): Promise<SheetSyncRunResult> {
+    const pending = await this.timeEntryRepository.find({
+      where: { sheetSyncedAt: IsNull() },
+      order: { createdAt: 'ASC' },
+      take: SHEET_SYNC_BATCH_SIZE,
+    });
+
+    if (!pending.length) {
+      return { attempted: 0, synced: 0 };
+    }
+
+    this.logger.log(`Sync con Sheets: reintentando ${pending.length} registro(s) pendiente(s).`);
+
+    let synced = 0;
+    for (const entry of pending) {
+      if (await this.trySyncToGoogleSheet(entry)) {
+        synced += 1;
+      }
+    }
+
+    this.logger.log(`Sync con Sheets: ${synced}/${pending.length} sincronizado(s) en esta corrida.`);
+    return { attempted: pending.length, synced };
+  }
+
+  // Para el panel de admin: cuántas horas están sin confirmar en el sheet y desde cuándo.
+  async getSheetSyncStatus(): Promise<SheetSyncStatus> {
+    const pending = await this.timeEntryRepository.find({
+      where: { sheetSyncedAt: IsNull() },
+      order: { createdAt: 'ASC' },
+    });
+
+    return {
+      pendingCount: pending.length,
+      oldestPendingDate: pending[0]?.date ?? null,
+      recentErrors: pending
+        .filter((entry) => entry.sheetSyncAttempts > 0)
+        .slice(0, 10)
+        .map((entry) => ({
+          id: entry.id,
+          date: entry.date,
+          attempts: entry.sheetSyncAttempts,
+          lastError: entry.sheetSyncLastError,
+        })),
+    };
   }
 }
