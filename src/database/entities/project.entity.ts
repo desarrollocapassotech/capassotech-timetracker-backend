@@ -19,9 +19,6 @@ export class ProjectEntity {
   @Column({ type: 'enum', enum: BillingCurrency, enumName: 'billing_currency', nullable: true })
   currency: BillingCurrency | null;
 
-  @Column({ name: 'contract_end_date', type: 'date', nullable: true })
-  contractEndDate: string | null;
-
   // Nullable: si falta, el frontend asume 'hourly' (misma regla que hoy, resuelta en la app).
   @Column({ name: 'billing_type', type: 'enum', enum: ProjectBillingType, enumName: 'project_billing_type', nullable: true })
   billingType: ProjectBillingType | null;

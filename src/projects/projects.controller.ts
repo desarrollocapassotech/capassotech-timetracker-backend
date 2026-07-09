@@ -1,10 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/auth.types';
 import { FirebaseAuthGuard } from '../auth/guards/firebase-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ProjectsService } from './projects.service';
-import type { CreateProjectDto, UpdateProjectDto } from './projects.dto';
+import type { CreateProjectDto, ReplaceProjectDeliverablesDto, UpdateProjectDto } from './projects.dto';
 
 // La lectura queda abierta a cualquier usuario autenticado: la lista de proyectos
 // se usa en toda la app (carga de horas, historial de clientes, panel de PM/QA,
@@ -48,5 +48,14 @@ export class ProjectsController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.projectsService.remove(id);
+  }
+
+  // Entregables: reemplaza toda la lista de una (mismo criterio de permisos que
+  // el resto de las mutaciones de proyectos: solo admin).
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Put(':id/deliverables')
+  replaceDeliverables(@Param('id') id: string, @Body() body: ReplaceProjectDeliverablesDto) {
+    return this.projectsService.replaceDeliverables(id, body.deliverables ?? []);
   }
 }

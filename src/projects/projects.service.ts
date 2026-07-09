@@ -2,13 +2,14 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { EntityManager, Repository } from 'typeorm';
-import { ProjectCollaboratorRole, ProjectEntity } from '../database/entities';
+import { ProjectCollaboratorRole, ProjectEntity, ProjectDeliverableEntity } from '../database/entities';
 import { ProjectCollaboratorEntity } from '../database/entities';
-import { CreateProjectDto, UpdateProjectDto } from './projects.dto';
+import { CreateProjectDto, ProjectDeliverableDto, UpdateProjectDto } from './projects.dto';
 
 export interface ProjectResponse extends ProjectEntity {
   managerIds: string[];
   teamMemberIds: string[];
+  deliverables: (ProjectDeliverableDto & { id: string })[];
 }
 
 @Injectable()
@@ -18,11 +19,16 @@ export class ProjectsService {
     private readonly projectRepository: Repository<ProjectEntity>,
     @InjectRepository(ProjectCollaboratorEntity)
     private readonly assignmentRepository: Repository<ProjectCollaboratorEntity>,
+    @InjectRepository(ProjectDeliverableEntity)
+    private readonly deliverableRepository: Repository<ProjectDeliverableEntity>,
   ) {}
 
   async findAll(): Promise<ProjectResponse[]> {
     const projects = await this.projectRepository.find({ order: { name: 'ASC' } });
-    const assignments = await this.assignmentRepository.find();
+    const [assignments, deliverables] = await Promise.all([
+      this.assignmentRepository.find(),
+      this.deliverableRepository.find({ order: { dueDate: 'ASC' } }),
+    ]);
 
     const managersByProject = new Map<string, string[]>();
     const teamByProject = new Map<string, string[]>();
@@ -33,10 +39,18 @@ export class ProjectsService {
       map.set(assignment.projectId, list);
     }
 
+    const deliverablesByProject = new Map<string, (ProjectDeliverableDto & { id: string })[]>();
+    for (const deliverable of deliverables) {
+      const list = deliverablesByProject.get(deliverable.projectId) ?? [];
+      list.push({ id: deliverable.id, name: deliverable.name, dueDate: deliverable.dueDate });
+      deliverablesByProject.set(deliverable.projectId, list);
+    }
+
     return projects.map((project) => ({
       ...project,
       managerIds: managersByProject.get(project.id) ?? [],
       teamMemberIds: teamByProject.get(project.id) ?? [],
+      deliverables: deliverablesByProject.get(project.id) ?? [],
     }));
   }
 
@@ -60,7 +74,6 @@ export class ProjectsService {
         active: dto.active ?? true,
         rate: dto.rate != null ? String(dto.rate) : null,
         currency: dto.currency ?? null,
-        contractEndDate: dto.contractEndDate ?? null,
         billingType: dto.billingType ?? null,
         clientId: dto.clientId ?? null,
         jiraIds: dto.jiraIds ?? [],
@@ -88,7 +101,6 @@ export class ProjectsService {
       if (dto.active !== undefined) existing.active = dto.active;
       if (dto.rate !== undefined) existing.rate = dto.rate == null ? null : String(dto.rate);
       if (dto.currency !== undefined) existing.currency = dto.currency;
-      if (dto.contractEndDate !== undefined) existing.contractEndDate = dto.contractEndDate;
       if (dto.billingType !== undefined) existing.billingType = dto.billingType;
       if (dto.clientId !== undefined) existing.clientId = dto.clientId;
       if (dto.jiraIds !== undefined) existing.jiraIds = dto.jiraIds;
@@ -134,15 +146,55 @@ export class ProjectsService {
   }
 
   private async withAssignments(project: ProjectEntity, manager?: EntityManager): Promise<ProjectResponse> {
-    const repo = manager ? manager.getRepository(ProjectCollaboratorEntity) : this.assignmentRepository;
-    const assignments = await repo.find({ where: { projectId: project.id } });
+    const assignmentRepo = manager ? manager.getRepository(ProjectCollaboratorEntity) : this.assignmentRepository;
+    const deliverableRepo = manager ? manager.getRepository(ProjectDeliverableEntity) : this.deliverableRepository;
+    const [assignments, deliverables] = await Promise.all([
+      assignmentRepo.find({ where: { projectId: project.id } }),
+      deliverableRepo.find({ where: { projectId: project.id }, order: { dueDate: 'ASC' } }),
+    ]);
     return {
       ...project,
       managerIds: assignments.filter((a) => a.role === ProjectCollaboratorRole.MANAGER).map((a) => a.collaboratorId),
       teamMemberIds: assignments
         .filter((a) => a.role === ProjectCollaboratorRole.TEAM_MEMBER)
         .map((a) => a.collaboratorId),
+      deliverables: deliverables.map((d) => ({ id: d.id, name: d.name, dueDate: d.dueDate })),
     };
+  }
+
+  // Reemplaza de una todos los entregables de un proyecto (mismo patrón que
+  // replaceRoleAssignments: el form manda la lista completa, acá se borra y se
+  // reinserta todo junto).
+  async replaceDeliverables(id: string, deliverables: ProjectDeliverableDto[]): Promise<ProjectResponse> {
+    await this.findEntity(this.projectRepository.manager, id); // 404 si no existe
+
+    for (const deliverable of deliverables) {
+      if (!deliverable.name?.trim()) {
+        throw new BadRequestException('Cada entregable necesita un nombre.');
+      }
+      if (!deliverable.dueDate || Number.isNaN(new Date(deliverable.dueDate).getTime())) {
+        throw new BadRequestException('Cada entregable necesita una fecha válida.');
+      }
+    }
+
+    await this.projectRepository.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(ProjectDeliverableEntity);
+      await repo.delete({ projectId: id });
+
+      if (!deliverables.length) return;
+
+      const rows = deliverables.map((deliverable) =>
+        repo.create({
+          id: randomUUID(),
+          projectId: id,
+          name: deliverable.name.trim(),
+          dueDate: deliverable.dueDate,
+        }),
+      );
+      await repo.save(rows);
+    });
+
+    return this.findOne(id);
   }
 
   private async replaceRoleAssignments(

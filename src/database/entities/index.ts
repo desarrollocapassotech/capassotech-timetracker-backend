@@ -5,6 +5,7 @@ import { CollaboratorEntity } from './collaborator.entity';
 import { CollaboratorProjectRateEntity } from './collaborator-project-rate.entity';
 import { HealthCheckEntity } from './health-check.entity';
 import { ProjectCollaboratorEntity } from './project-collaborator.entity';
+import { ProjectDeliverableEntity } from './project-deliverable.entity';
 import { ProjectEntity } from './project.entity';
 import { TimeEntryEntity } from './time-entry.entity';
 import { TicketAttachmentEntity } from './ticket-attachment.entity';
@@ -19,6 +20,7 @@ export * from './collaborator-project-rate.entity';
 export * from './enums';
 export * from './health-check.entity';
 export * from './project-collaborator.entity';
+export * from './project-deliverable.entity';
 export * from './project.entity';
 export * from './time-entry.entity';
 export * from './ticket-attachment.entity';
@@ -32,6 +34,7 @@ export const entities = [
   ClientEntity,
   ProjectEntity,
   ProjectCollaboratorEntity,
+  ProjectDeliverableEntity,
   ClientFunctionalAnalystEntity,
   TimeEntryEntity,
   HealthCheckEntity,
