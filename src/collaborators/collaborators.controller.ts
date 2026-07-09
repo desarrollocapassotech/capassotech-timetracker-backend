@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthService } from '../auth/auth.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -7,7 +7,11 @@ import { UserRole } from '../auth/auth.types';
 import { AuthenticatedRequest, FirebaseAuthGuard } from '../auth/guards/firebase-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CollaboratorsService } from './collaborators.service';
-import type { CreateCollaboratorDto, UpdateCollaboratorDto } from './collaborators.dto';
+import type {
+  CreateCollaboratorDto,
+  ReplaceCollaboratorProjectRatesDto,
+  UpdateCollaboratorDto,
+} from './collaborators.dto';
 
 // La lectura queda abierta a cualquier usuario autenticado: la lista de
 // colaboradores se usa en toda la app (time entries, equipos de proyecto,
@@ -69,6 +73,21 @@ export class CollaboratorsController {
   ) {
     const requesterProfile = await this.authService.getProfile(user.uid, user.email);
     return this.collaboratorsService.uploadProfileImage(id, file, {
+      uid: user.uid,
+      roles: requesterProfile.roles,
+    });
+  }
+
+  // Valor hora por proyecto: reemplaza toda la lista de una (mismo criterio de
+  // permisos que el sueldo: admin, o contable vía ACCOUNTANT_RATE_FIELDS).
+  @Put(':id/project-rates')
+  async replaceProjectRates(
+    @Param('id') id: string,
+    @Body() body: ReplaceCollaboratorProjectRatesDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    const requesterProfile = await this.authService.getProfile(user.uid, user.email);
+    return this.collaboratorsService.replaceProjectRates(id, body.rates ?? [], {
       uid: user.uid,
       roles: requesterProfile.roles,
     });
