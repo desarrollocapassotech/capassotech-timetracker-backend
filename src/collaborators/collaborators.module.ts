@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { AppUserEntity, CollaboratorEntity, CollaboratorProjectRateEntity } from '../database/entities';
+import { CollaboratorReceiptService } from './collaborator-receipt.service';
 import { CollaboratorsController } from './collaborators.controller';
 import { CollaboratorsService } from './collaborators.service';
 
@@ -11,7 +12,7 @@ import { CollaboratorsService } from './collaborators.service';
     AuthModule,
   ],
   controllers: [CollaboratorsController],
-  providers: [CollaboratorsService],
+  providers: [CollaboratorsService, CollaboratorReceiptService],
   exports: [CollaboratorsService],
 })
 export class CollaboratorsModule {}
