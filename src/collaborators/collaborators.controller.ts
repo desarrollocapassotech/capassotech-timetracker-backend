@@ -1,4 +1,18 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Header,
+  Param,
+  Patch,
+  Post,
+  Put,
+  StreamableFile,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthService } from '../auth/auth.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -6,6 +20,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/auth.types';
 import { AuthenticatedRequest, FirebaseAuthGuard } from '../auth/guards/firebase-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { CollaboratorReceiptService } from './collaborator-receipt.service';
+import type { GenerateCollaboratorReceiptDto } from './collaborator-receipt.dto';
 import { CollaboratorsService } from './collaborators.service';
 import type {
   CreateCollaboratorDto,
@@ -22,6 +38,7 @@ export class CollaboratorsController {
   constructor(
     private readonly collaboratorsService: CollaboratorsService,
     private readonly authService: AuthService,
+    private readonly collaboratorReceiptService: CollaboratorReceiptService,
   ) {}
 
   @Get()
@@ -58,6 +75,22 @@ export class CollaboratorsController {
       uid: user.uid,
       roles: requesterProfile.roles,
     });
+  }
+
+  // Recibo de pago: admin o contable (ver EmployeeManagement.tsx -> botón
+  // "Emitir recibo"). El frontend arma y previsualiza los datos editables; acá
+  // solo se vuelcan sobre el template de templates/template-recibo-colaborador.pdf.
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.CONTABLE)
+  @Post(':id/receipt')
+  @Header('Content-Type', 'application/pdf')
+  async generateReceipt(
+    @Param('id') id: string,
+    @Body() body: GenerateCollaboratorReceiptDto,
+  ): Promise<StreamableFile> {
+    await this.collaboratorsService.findOne(id); // 404 si no existe
+    const pdf = await this.collaboratorReceiptService.generate(body);
+    return new StreamableFile(pdf);
   }
 
   // Foto de perfil: mismo criterio de permisos que update() (ver
