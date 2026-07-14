@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, StandardFonts, TextAlignment, rgb } from 'pdf-lib';
 import { GenerateCollaboratorReceiptDto } from './collaborator-receipt.dto';
 
 // Mismo criterio que firebase-admin.provider.ts para ubicar archivos locales:
@@ -82,9 +82,13 @@ export class CollaboratorReceiptService {
     setText('Mes y año', dto.monthYear);
     setText('Metodo de pago', dto.paymentMethod);
 
+    // La descripción del concepto va alineada a la izquierda (el template la
+    // trae centrada por defecto, ilegible con texto largo tipo "Horas
+    // trabajadas en <proyecto> ($X/h)"); cantidad/monto quedan como están.
     dto.items.forEach((item, index) => {
       const row = ROW_FIELDS[index];
       setText(row.description, item.description);
+      form.getTextField(row.description).setAlignment(TextAlignment.Left);
       setText(row.quantity, item.quantity);
       setText(row.amount, item.amount);
     });
