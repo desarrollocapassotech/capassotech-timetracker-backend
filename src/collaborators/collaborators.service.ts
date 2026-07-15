@@ -95,7 +95,11 @@ export class CollaboratorsService {
     private readonly authService: AuthService,
   ) {}
 
-  async findAll(): Promise<CollaboratorResponse[]> {
+  // Lectura para la app: cualquier usuario autenticado puede listar colaboradores
+  // (se usa para nombres/fotos en equipos, selects, etc.), pero los montos
+  // (hourlyRate, exchangeRate, tarifas por proyecto) solo se devuelven completos
+  // para admin, contable, o el propio colaborador viendo su propio registro.
+  async findAll(requester: RequesterContext): Promise<CollaboratorResponse[]> {
     const [collaborators, rates] = await Promise.all([
       this.collaboratorRepository.find({ order: { name: 'ASC' } }),
       this.projectRateRepository.find(),
@@ -108,18 +112,50 @@ export class CollaboratorsService {
       ratesByCollaborator.set(rate.collaboratorId, list);
     }
 
-    return collaborators.map((collaborator) => ({
-      ...collaborator,
-      projectRates: ratesByCollaborator.get(collaborator.id) ?? [],
-    }));
+    return collaborators.map((collaborator) =>
+      this.applyFinancialVisibility(
+        { ...collaborator, projectRates: ratesByCollaborator.get(collaborator.id) ?? [] },
+        requester,
+      ),
+    );
   }
 
+  // Igual que findOne, pero redactando montos para quien no sea admin/contable
+  // ni el propio colaborador. Es lo único que expone el endpoint GET /:id.
+  async findOneRedacted(id: string, requester: RequesterContext): Promise<CollaboratorResponse> {
+    const found = await this.findOne(id);
+    return this.applyFinancialVisibility(found, requester);
+  }
+
+  // Uso interno (alta/edición/generación de recibos): siempre sin redactar,
+  // porque estos flujos necesitan el valor real para mutarlo o para el PDF.
   async findOne(id: string): Promise<CollaboratorResponse> {
     const found = await this.collaboratorRepository.findOneBy({ id });
     if (!found) {
       throw new NotFoundException('Colaborador no encontrado.');
     }
     return this.attachProjectRates(found);
+  }
+
+  private applyFinancialVisibility(
+    collaborator: CollaboratorResponse,
+    requester: RequesterContext,
+  ): CollaboratorResponse {
+    const canSeeAmounts =
+      requester.roles.includes(UserRole.ADMIN) ||
+      requester.roles.includes(UserRole.CONTABLE) ||
+      collaborator.userId === requester.uid;
+
+    if (canSeeAmounts) {
+      return collaborator;
+    }
+
+    return {
+      ...collaborator,
+      hourlyRate: '0',
+      exchangeRate: null,
+      projectRates: [],
+    };
   }
 
   async create(dto: CreateCollaboratorDto): Promise<CollaboratorResponse> {
