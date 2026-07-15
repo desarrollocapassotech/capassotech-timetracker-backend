@@ -42,15 +42,13 @@ export class CollaboratorsController {
   ) {}
 
   @Get()
-  async findAll(@CurrentUser() user: AuthenticatedRequest['user']) {
-    const requesterProfile = await this.authService.getProfile(user.uid, user.email);
-    return this.collaboratorsService.findAll({ uid: user.uid, roles: requesterProfile.roles });
+  findAll() {
+    return this.collaboratorsService.findAll();
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string, @CurrentUser() user: AuthenticatedRequest['user']) {
-    const requesterProfile = await this.authService.getProfile(user.uid, user.email);
-    return this.collaboratorsService.findOneRedacted(id, { uid: user.uid, roles: requesterProfile.roles });
+  findOne(@Param('id') id: string) {
+    return this.collaboratorsService.findOne(id);
   }
 
   // Alta: solo admin (igual que hoy, el botón "Nuevo Colaborador" no se muestra
